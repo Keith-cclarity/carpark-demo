@@ -1,3 +1,5 @@
+@inject IConfiguration Configuration
+
 <!DOCTYPE html>
 <html lang="en">
 
@@ -14,7 +16,21 @@
 
 <body>
     <Routes />
+    <script src="@Assets["js/smartParkingMap.js"]"></script>
+    @if (HasGoogleMapsApiKey)
+    {
+        <script async
+                src="https://maps.googleapis.com/maps/api/js?key=@GoogleMapsApiKey&loading=async&libraries=places,geocoding"></script>
+    }
     <script src="@Assets["_framework/blazor.web.js"]"></script>
 </body>
 
 </html>
+
+@code {
+    private string? GoogleMapsApiKey => Configuration["GoogleMaps:ApiKey"];
+
+    private bool HasGoogleMapsApiKey =>
+        !string.IsNullOrWhiteSpace(GoogleMapsApiKey)
+        && !GoogleMapsApiKey.Contains("{{", StringComparison.Ordinal);
+}

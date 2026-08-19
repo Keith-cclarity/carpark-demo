@@ -31,14 +31,14 @@ The workshop does not cover Azure deployment, databases, MCP servers, future ava
 
 The template includes:
 
-- A buildable .NET 10 Aspire solution with empty ApiApp and WebApp surfaces
+- A working .NET 10 Aspire solution with a polling ApiApp, interactive Blazor WebApp, and end-to-end parking search flow
 - HDB Car Park Information and representative Car Park Availability data
 - The published data.gov.sg API contract and sample HTTP request
 - API-key setup guides for Google Maps Platform and data.gov.sg
 - [`IDEATION.md`](IDEATION.md), the starting product concept
 - Bootstrap issues that are created once when a repository is made from this template
 
-Participants create `AGENTS.md`, `PRD.md`, `TRD.md`, application behavior, tests, the canvas extension, and the AI parking agent during the workshop.
+Participants create `AGENTS.md`, `PRD.md`, `TRD.md`, the canvas extension, and the AI parking agent during the workshop. The repository now includes the Smart Parking Navigator application and backend test coverage.
 
 ## Starter Structure
 
@@ -55,6 +55,13 @@ Participants create `AGENTS.md`, `PRD.md`, `TRD.md`, application behavior, tests
 ├── CarparkAvailability.slnx
 ├── IDEATION.md
 └── README.md
+```
+
+## Validate the App
+
+```bash
+dotnet build CarparkAvailability.slnx
+dotnet test CarparkAvailability.slnx
 ```
 
 ## Data Acknowledgement

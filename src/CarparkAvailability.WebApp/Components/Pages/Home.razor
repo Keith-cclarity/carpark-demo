@@ -1,28 +1,245 @@
 @page "/"
+@rendermode InteractiveServer
 
 <PageTitle>Smart Parking Navigator</PageTitle>
 
-<section class="hero">
-    <p class="eyebrow">Workshop starter</p>
-    <h1>Find a suitable HDB car park near your destination.</h1>
-    <p>
-        The Aspire application is running. Use the workshop guides to design and
-        implement destination search, live availability, filters, and map-based
-        results.
-    </p>
-</section>
+<section class="search-page">
+    <div class="map-column">
+        <section class="search-card">
+            <p class="eyebrow">Live HDB parking</p>
+            <h1>Search a destination and compare nearby car parks.</h1>
+            <p class="search-copy">Find available HDB car parks near your destination, compare occupancy, and inspect operating restrictions before you drive.</p>
+            <label class="field-label" for="destination-search">Destination</label>
+            <input id="destination-search"
+                   @ref="searchInput"
+                   @bind="searchText"
+                   class="search-input"
+                   placeholder="Search for an address or place in Singapore"
+                   disabled="@(!HasGoogleMapsApiKey)" />
+            <p class="helper-text">Google Places Autocomplete is restricted to Singapore.</p>
+            @if (!HasGoogleMapsApiKey)
+            {
+                <div class="state-banner warning">
+                    Google Maps is not configured. Set <code>GoogleMaps__ApiKey</code> to enable destination search.
+                </div>
+            }
+        </section>
 
-<section class="starter-grid" aria-label="Starter application status">
-    <article>
-        <h2>Frontend</h2>
-        <p>The Blazor Web App is ready for implementation.</p>
-    </article>
-    <article>
-        <h2>Backend</h2>
-        <p>ASP.NET Core, health endpoints, and the HDB dataset are wired.</p>
-    </article>
-    <article>
-        <h2>Orchestration</h2>
-        <p>.NET Aspire runs both projects and supplies API credentials.</p>
-    </article>
+        <section class="map-card" aria-label="Map view">
+            <div @ref="mapElement" class="parking-map"></div>
+            @if (!isMapReady)
+            {
+                <div class="map-overlay">Waiting for Google Maps…</div>
+            }
+        </section>
+    </div>
+
+    <aside class="results-column" aria-live="polite">
+        <section class="panel-card">
+            <div class="panel-header">
+                <div>
+                    <p class="eyebrow">Nearby results</p>
+                    <h2>Car parks</h2>
+                </div>
+                @if (hasLoadedResponse)
+                {
+                    <div class="snapshot-meta">
+                        <span>@lastSnapshotTime?.ToString("dd MMM yyyy HH:mm")</span>
+                        <span>Cache age @lastCacheAgeSeconds s</span>
+                    </div>
+                }
+            </div>
+
+            <div class="filters-grid">
+                <label>
+                    <span>Availability</span>
+                    <input type="checkbox" @bind="showAvailableOnly" @bind:after="OnFiltersChangedAsync" />
+                    <strong>Available lots only</strong>
+                </label>
+                <label>
+                    <span>Lot type</span>
+                    <select @bind="selectedLotType" @bind:after="OnFiltersChangedAsync">
+                        <option value="">All</option>
+                        <option value="C">Cars</option>
+                        <option value="H">Heavy vehicles</option>
+                        <option value="M">Motorcycles</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Parking</span>
+                    <input type="checkbox" @bind="nightParkingOnly" @bind:after="OnFiltersChangedAsync" />
+                    <strong>Night parking only</strong>
+                </label>
+                <label>
+                    <span>Car park type</span>
+                    <select @bind="selectedCarParkType" @bind:after="OnFiltersChangedAsync">
+                        <option value="">All</option>
+                        @foreach (string carParkType in availableCarParkTypes)
+                        {
+                            <option value="@carParkType">@carParkType</option>
+                        }
+                    </select>
+                </label>
+            </div>
+
+            @if (loadState == NearbyLoadState.Idle)
+            {
+                <div class="empty-state">
+                    <h3>Start with a destination</h3>
+                    <p>Use the search box to centre the map and load nearby HDB car park availability.</p>
+                </div>
+            }
+            else if (loadState == NearbyLoadState.Loading)
+            {
+                <div class="loading-stack" aria-label="Loading nearby car parks">
+                    @for (int index = 0; index < 3; index++)
+                    {
+                        <article class="carpark-card skeleton-card">
+                            <div class="skeleton-line wide"></div>
+                            <div class="skeleton-line"></div>
+                            <div class="skeleton-line short"></div>
+                        </article>
+                    }
+                </div>
+            }
+            else if (loadState == NearbyLoadState.Unavailable)
+            {
+                <div class="empty-state error-state">
+                    <h3>Live availability is unavailable</h3>
+                    <p>@statusMessage</p>
+                </div>
+            }
+            else if (loadState == NearbyLoadState.Error)
+            {
+                <div class="empty-state error-state">
+                    <h3>Unable to load nearby car parks</h3>
+                    <p>@statusMessage</p>
+                </div>
+            }
+            else
+            {
+                @if (showLastKnownGoodBanner)
+                {
+                    <div class="state-banner info">Showing the last known good snapshot while the live feed catches up.</div>
+                }
+                @if (showStaleBanner)
+                {
+                    <div class="state-banner warning">Some results are stale because their update time is more than five minutes behind the snapshot.</div>
+                }
+
+                @if (filteredCarParks.Count == 0)
+                {
+                    <div class="empty-state">
+                        <h3>No car parks match the current filters</h3>
+                        <p>Try widening the search or relaxing one of the filters.</p>
+                    </div>
+                }
+                else
+                {
+                    <div class="results-list">
+                        @foreach (NearbyCarparkResponseDto carPark in filteredCarParks)
+                        {
+                            <button type="button"
+                                    class="carpark-card @(selectedCarParkNo == carPark.CarParkNo ? "selected" : null)"
+                                    @onclick="() => OnCarParkSelectedAsync(carPark.CarParkNo)">
+                                <div class="card-header-row">
+                                    <div>
+                                        <h3>@carPark.CarParkNo</h3>
+                                        <p>@carPark.Address</p>
+                                    </div>
+                                    <span class="distance-pill">@FormatDistance(carPark.DistanceMetres)</span>
+                                </div>
+                                <div class="metric-row">
+                                    <div>
+                                        <span class="metric-label">Availability</span>
+                                        <strong>@carPark.AvailableLots / @carPark.TotalLots</strong>
+                                    </div>
+                                    <div>
+                                        <span class="metric-label">Occupancy</span>
+                                        <strong>@carPark.OccupancyPercentage%</strong>
+                                    </div>
+                                    <div>
+                                        <span class="metric-label">Lot types</span>
+                                        <strong>@FormatLotTypes(carPark.Lots)</strong>
+                                    </div>
+                                </div>
+                                <div class="tag-row">
+                                    <span class="tag @(carPark.AvailableLots > 0 ? "success" : "neutral")">@(carPark.AvailableLots > 0 ? "Available" : "Full / unavailable")</span>
+                                    @if (carPark.NightParking)
+                                    {
+                                        <span class="tag">Night parking</span>
+                                    }
+                                    <span class="tag">@GetFreshnessLabel(carPark.UpdateDatetime, carPark.IsStale)</span>
+                                </div>
+                            </button>
+                        }
+                    </div>
+                }
+            }
+        </section>
+
+        <section class="panel-card detail-card">
+            <div class="panel-header">
+                <div>
+                    <p class="eyebrow">Selected car park</p>
+                    <h2>Details</h2>
+                </div>
+            </div>
+
+            @if (selectedDetail is null)
+            {
+                <div class="empty-state compact">
+                    <p>Select a car park card or map marker to inspect its live lots and operating constraints.</p>
+                </div>
+            }
+            else
+            {
+                <article class="detail-body">
+                    <h3>@selectedDetail.CarParkNo</h3>
+                    <p class="detail-address">@selectedDetail.Address</p>
+                    <div class="detail-metrics">
+                        <div>
+                            <span class="metric-label">Available</span>
+                            <strong>@selectedDetail.AvailableLots / @selectedDetail.TotalLots</strong>
+                        </div>
+                        <div>
+                            <span class="metric-label">Occupancy</span>
+                            <strong>@selectedDetail.OccupancyPercentage%</strong>
+                        </div>
+                        <div>
+                            <span class="metric-label">Freshness</span>
+                            <strong>@GetFreshnessLabel(selectedDetail.UpdateDatetime, selectedDetail.IsStale)</strong>
+                        </div>
+                    </div>
+                    <dl class="detail-grid">
+                        <div><dt>Type</dt><dd>@selectedDetail.CarParkType</dd></div>
+                        <div><dt>Parking system</dt><dd>@selectedDetail.ParkingSystem</dd></div>
+                        <div><dt>Short-term parking</dt><dd>@selectedDetail.ShortTermParking</dd></div>
+                        <div><dt>Free parking</dt><dd>@selectedDetail.FreeParking</dd></div>
+                        <div><dt>Night parking</dt><dd>@FormatBoolean(selectedDetail.NightParking)</dd></div>
+                        <div><dt>Decks</dt><dd>@(selectedDetail.CarParkDecks?.ToString() ?? "—")</dd></div>
+                        <div><dt>Gantry height</dt><dd>@FormatHeight(selectedDetail.GantryHeight)</dd></div>
+                        <div><dt>Basement</dt><dd>@FormatBoolean(selectedDetail.CarParkBasement)</dd></div>
+                    </dl>
+                    <div class="lot-breakdown">
+                        <h4>Live lot availability</h4>
+                        @if (selectedDetail.Lots.Count == 0)
+                        {
+                            <p>No live lot data is available for this car park in the current snapshot.</p>
+                        }
+                        else
+                        {
+                            @foreach (LotAvailabilityDto lot in selectedDetail.Lots)
+                            {
+                                <div class="lot-row">
+                                    <span>@GetLotTypeLabel(lot.LotType)</span>
+                                    <strong>@lot.LotsAvailable / @lot.TotalLots</strong>
+                                </div>
+                            }
+                        }
+                    </div>
+                </article>
+            }
+        </section>
+    </aside>
 </section>
